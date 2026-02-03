@@ -69,7 +69,7 @@ jobs:
           arch: ${{ matrix.job.arch }}
           ros_distro: ${{ matrix.ros_distro }}
           github_release: false
-          public: false
+          public: true
           changelog: false
           skip_build: false
           skip_tag: true
@@ -91,7 +91,7 @@ jobs:
           package_dir: ./
           package: ${{ github.event.inputs.package }}
           github_release: true
-          public: false
+          public: true
           changelog: false
           skip_build: true
           skip_tag: false
