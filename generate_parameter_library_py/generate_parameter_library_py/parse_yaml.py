@@ -106,12 +106,47 @@ def get_dynamic_parameter_field(yaml_parameter_name: str):
     return '.'.join(field)
 
 
-def get_dynamic_mapped_parameter(yaml_parameter_name: str):
+# Names of every parameter declared by the yaml currently being parsed, so a
+# __map_ directive can find the array that supplies its keys in an enclosing
+# scope instead of assuming the root. Module scope because the lookup happens
+# in the __str__ of several free-standing generator classes, long after the
+# walk that collected the names. Reset by GenerateCode.parse().
+_declared_parameters = set()
+
+
+def resolve_mapped_key_list(scope: List[str], key: str):
+    """Path to the array parameter that supplies a __map_<key>'s keys.
+
+    Searches from the innermost enclosing scope out to the root, so a map
+    under `presence.device` can be keyed on `presence.devices` as well as on
+    a root-level `devices`. Scopes inside another map are skipped: a key list
+    cannot itself be a per-key value. Falls back to the bare key at the root,
+    which is where every key list had to live before this search existed.
+    """
+    for i in range(len(scope), -1, -1):
+        prefix = scope[:i]
+        if any(is_mapped_parameter(val) for val in prefix):
+            continue
+        candidate = '.'.join(prefix + [key])
+        if candidate in _declared_parameters:
+            return candidate
+    return key
+
+
+def get_dynamic_mapped_parameter_keys(yaml_parameter_name: str):
+    """Bare __map_<key> names of every enclosing map, outermost first."""
     tmp = yaml_parameter_name.split('.')
-    mapped_params = [
-        val.replace('__map_', '') for val in tmp[:-1] if is_mapped_parameter(val)
+    return [val.replace('__map_', '') for val in tmp[:-1] if is_mapped_parameter(val)]
+
+
+def get_dynamic_mapped_parameter(yaml_parameter_name: str):
+    """Params-struct-relative paths of the key lists driving each map."""
+    tmp = yaml_parameter_name.split('.')
+    return [
+        resolve_mapped_key_list(tmp[:i], val.replace('__map_', ''))
+        for i, val in enumerate(tmp[:-1])
+        if is_mapped_parameter(val)
     ]
-    return mapped_params
 
 
 def get_dynamic_struct_name(yaml_parameter_name: str):
@@ -130,7 +165,9 @@ def get_dynamic_parameter_name(yaml_parameter_name: str):
 
 
 def get_dynamic_parameter_map(yaml_parameter_name: str):
-    mapped_params = get_dynamic_mapped_parameter(yaml_parameter_name)
+    # Struct member names, which stay unqualified however deeply the map is
+    # nested - DeclareStruct names the member after the bare key.
+    mapped_params = get_dynamic_mapped_parameter_keys(yaml_parameter_name)
     parameter_map = [val + '_map' for val in mapped_params]
     parameter_map = '.'.join(parameter_map)
     return parameter_map
@@ -760,6 +797,7 @@ class GenerateCode:
         self.user_validation_file = ''
 
     def parse(self, yaml_file, validate_header):
+        _declared_parameters.clear()
         with open(yaml_file) as f:
             try:
                 docs = yaml.load_all(f, Loader=yaml.Loader)
@@ -790,6 +828,7 @@ class GenerateCode:
             return
 
         param_name = code_gen_variable.param_name
+        _declared_parameters.add(param_name)
         update_parameter_invalid = (
             code_gen_variable.conversion.update_parameter_fail_validation()
         )

@@ -364,6 +364,26 @@ params.gain.joints_map.at("joint1").interfaces_map.at("position").value
 params.gain.get_entry("joint1").get_entry("position").value
 ```
 
+The key parameter does not have to sit at the root. It is looked up from the
+innermost scope enclosing the `__map_` outwards, so it can be a sibling of the
+struct holding the map:
+
+```yaml
+cpp_name_space:
+  presence:
+    devices:  # keys for the map below
+      type: string_array
+      default_value: ["sigma_jcu"]
+    device:
+      __map_devices:
+        interface:
+          type: string
+```
+
+```c++
+params.presence.device.devices_map.at("sigma_jcu").interface
+```
+
 ### Additional Constraints
 The `additional_constraints` field is not mandatory but allows for user defined data to be packaged into the ParameterDescriptor.
 This is useful when you need to convey additional data, constraints, or instructions along with the parameter for your specific application,
