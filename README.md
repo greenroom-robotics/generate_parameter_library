@@ -442,7 +442,7 @@ auto params = param_listener->get_params();
 
 ### Use generated struct in Rust (rclrs)
 Rust code is generated against [rclrs](https://crates.io/crates/rclrs) 0.8 by the `generate_parameter_library_rs` crate, which runs the `generate_parameter_library_rust` script from `generate_parameter_library_py`.
-Add the `ros-kilted-generate-parameter-library-rs` conda package (pixi `[package.host-dependencies]`) to your package, and add `generate_parameter_library_rs` as a build dependency in `Cargo.toml`:
+Add `generate_parameter_library_rs` (conda package `ros-kilted-generate-parameter-library-rs`) as a build dependency of your package, and to `Cargo.toml`:
 
 **Cargo.toml**
 ```toml

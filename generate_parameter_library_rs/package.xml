@@ -1,0 +1,15 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>generate_parameter_library_rs</name>
+  <version>1.0.0</version>
+  <description>build.rs helper that generates rclrs parameter code with generate_parameter_library_py</description>
+  <maintainer email="tenzin.platter@greenroomrobotics.com">Tenzin Platter</maintainer>
+  <license>BSD-3-Clause</license>
+
+  <exec_depend>generate_parameter_library_py</exec_depend>
+
+  <export>
+    <build_type>ament_cargo</build_type>
+  </export>
+</package>
