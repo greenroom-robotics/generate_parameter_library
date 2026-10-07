@@ -1,0 +1,5 @@
+[package]
+name = "generate_parameter_library_py"
+version = "10.4.0"
+description = "Python to generate ROS parameter library."
+license = "BSD-3-Clause"
