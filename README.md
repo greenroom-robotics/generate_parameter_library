@@ -479,7 +479,8 @@ let color = &params.background;
 ```
 
 `ParamListener::new` returns a `DeclareError` that names the parameter that failed (no value for a parameter without a default, or an initial value that a validator rejects).
-`Params` derives `Clone`, `Debug`, `Default` and `PartialEq`. A nested struct gets a type name made from its path, for example `nest1.nest2` becomes `Nest1Nest2`.
+`Params` derives `Clone`, `Debug`, `Default` and `PartialEq`.
+`Params` is plain data, so tests can build it with a struct literal, and `is_old` compares it against the current values. A nested struct gets a type name made from its path, for example `nest1.nest2` becomes `Nest1Nest2`.
 
 | Parameter Type | Rust Type         |
 | -------------- | ----------------- |

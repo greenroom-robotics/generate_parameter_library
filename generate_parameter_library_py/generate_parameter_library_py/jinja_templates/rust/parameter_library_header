@@ -1,5 +1,8 @@
 {{comments}}
 
+#[allow(clippy::all, clippy::pedantic)]
+mod generated {
+
 use std::sync::{Arc, Mutex};
 
 #[allow(unused_imports)]
@@ -31,9 +34,6 @@ pub struct {{type_name}} {
 {% for name, type in fields %}
     pub {{name}}: {{type}},
 {% endfor %}
-{% if type_name == 'Params' %}
-    generation: u64,
-{% endif %}
 }
 {% endfor %}
 
@@ -110,10 +110,14 @@ impl ParamListener {
 {% for validation in p.validations %}
                     .and_then(|()| {{validation}})
 {% endfor %}
-{% if p.parsed %}
-                    .and_then(|()| convert_{{p.index}}(raw).map(|_| ()))
-{% endif %}
                     .map_err(|e: String| format!("Invalid value for parameter '{validation_name}': {e}"))
+{% if p.parsed %}
+                    .and_then(|()| {
+                        convert_{{p.index}}(raw)
+                            .map(|_| ())
+                            .map_err(|e| format!("Could not parse value for parameter '{validation_name}': {e}"))
+                    })
+{% endif %}
             })
 {% endif %}
 {% if p.read_only %}
@@ -135,7 +139,6 @@ impl ParamListener {
 {% else %}
                 params.{{p.name}} = {% if p.type.startswith('Arc') %}value.clone(){% else %}*value{% endif %};
 {% endif %}
-                params.generation += 1;
             });
         }
 {% endfor %}
@@ -145,7 +148,6 @@ impl ParamListener {
 {% for p in params %}
             params.{{p.name}} = {{p.read}};
 {% endfor %}
-            params.generation += 1;
         }
 
         Ok(Self {
@@ -166,14 +168,14 @@ impl ParamListener {
         let Ok(current) = self.params.try_lock() else {
             return false;
         };
-        if current.generation != params.generation {
+        if *current != *params {
             *params = current.clone();
         }
         true
     }
 
     pub fn is_old(&self, other: &Params) -> bool {
-        self.params.lock().unwrap().generation != other.generation
+        *self.params.lock().unwrap() != *other
     }
 }
 
@@ -293,3 +295,6 @@ pub mod validators {
         }
     }
 }
+}
+
+pub use generated::*;

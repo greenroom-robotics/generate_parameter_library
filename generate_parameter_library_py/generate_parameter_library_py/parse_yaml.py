@@ -1012,8 +1012,6 @@ def rust_literal(struct: DeclareStruct, type_name: str, reads: dict):
         + rust_literal(sub_struct, rust_sub_struct_type(type_name, sub_struct), reads)
         for sub_struct in struct.sub_structs
     ]
-    if type_name == 'Params':
-        fields.append('generation: 1')
     return type_name + ' { ' + ', '.join(fields) + ' }'
 
 
