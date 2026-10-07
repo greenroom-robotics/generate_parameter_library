@@ -69,6 +69,7 @@ setup(
             'jinja_templates/python/set_stack_params',
             'jinja_templates/python/update_parameter',
             'jinja_templates/python/update_runtime_parameter',
+            'jinja_templates/rust/parameter_library_header',
         ]
     },
     zip_safe=False,
@@ -83,7 +84,7 @@ setup(
         'Programming Language :: Python',
         'Topic :: Software Development',
     ],
-    description='Generate the ROS parameter struct in C++ and Python with callbacks for updating.',
+    description='Generate the ROS parameter struct in C++, Python and Rust with callbacks for updating.',
     license='BSD-3-Clause',
     tests_require=['pytest'],
     entry_points={
@@ -91,6 +92,7 @@ setup(
             'generate_parameter_library_cpp = generate_parameter_library_py.generate_cpp_header:main',
             'generate_parameter_library_python = generate_parameter_library_py.generate_python_module:main',
             'generate_parameter_library_markdown = generate_parameter_library_py.generate_markdown:main',
+            'generate_parameter_library_rust = generate_parameter_library_py.generate_rust_module:main',
         ],
     },
 )
