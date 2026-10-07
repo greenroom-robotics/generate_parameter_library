@@ -441,25 +441,24 @@ auto params = param_listener->get_params();
 ```
 
 ### Use generated struct in Rust (rclrs)
-Rust code is generated against [rclrs](https://crates.io/crates/rclrs) 0.8 with the `generate_parameter_library_rust` script (installed by `generate_parameter_library_py`).
-Call it from a `build.rs`:
+Rust code is generated against [rclrs](https://crates.io/crates/rclrs) 0.8 by the `generate_parameter_library_rs` crate, which runs the `generate_parameter_library_rust` script from `generate_parameter_library_py`.
+Add `generate_parameter_library_rs` as a build dependency of your package, and to `Cargo.toml`:
+
+**Cargo.toml**
+```toml
+[build-dependencies]
+generate_parameter_library_rs = "0.4"
+```
 
 **build.rs**
 ```rust
-use std::{env, path::PathBuf, process::Command};
-
 fn main() {
-    let yaml = "src/turtlesim_parameters.yaml";
-    let out = PathBuf::from(env::var("OUT_DIR").unwrap()).join("turtlesim_parameters.rs");
-    let status = Command::new("generate_parameter_library_rust")
-        .arg(&out)
-        .arg(yaml)
-        .status()
-        .expect("generate_parameter_library_rust not found");
-    assert!(status.success(), "parameter generation failed");
-    println!("cargo:rerun-if-changed={yaml}");
+    generate_parameter_library_rs::generate("src/turtlesim_parameters.yaml", None);
 }
 ```
+
+`generate` writes `$OUT_DIR/<yaml file stem>.rs` and reruns when the yaml file or the generator changes.
+Pass `Some("crate::custom")` as the second argument to use custom validators and parsers from that module.
 
 Include the generated file in its own module, because it brings `Arc`, `Mutex` and the validator functions into scope:
 

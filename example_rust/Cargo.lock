@@ -374,8 +374,13 @@ dependencies = [
 name = "generate_parameter_library_example_rust"
 version = "0.4.0"
 dependencies = [
+ "generate_parameter_library_rs",
  "rclrs",
 ]
+
+[[package]]
+name = "generate_parameter_library_rs"
+version = "0.4.0"
 
 [[package]]
 name = "getrandom"
