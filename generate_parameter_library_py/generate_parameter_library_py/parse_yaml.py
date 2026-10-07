@@ -691,6 +691,8 @@ def preprocess_inputs(language, name, value, nested_name_list):
         'additional_constraints',
         'validation',
         'type',
+        'parsed_type',
+        'parse',
     }
     invalid_keys = value.keys() - valid_keys
     if len(invalid_keys) > 0:
@@ -708,6 +710,15 @@ def preprocess_inputs(language, name, value, nested_name_list):
     else:
         code_gen_variable = CodeGenFixedVariable(
             language, name, param_name, defined_type, default_value
+        )
+
+    code_gen_variable.parsed_type = value.get('parsed_type')
+    code_gen_variable.parse = value.get('parse')
+    if code_gen_variable.parse and not code_gen_variable.parsed_type:
+        raise compile_error(f'Parameter {param_name}: parse requires parsed_type.')
+    if code_gen_variable.parsed_type and language in ('cpp', 'python'):
+        raise compile_error(
+            f'Parameter {param_name}: parsed_type is not yet supported for {language}.'
         )
 
     description = value.get('description', '')
@@ -949,30 +960,64 @@ class GenerateCode:
         env = Environment(keep_trailing_newline=True, trim_blocks=True)
         env.filters['rust_string_literal'] = rust_string_literal
         code = env.from_string(GenerateCode.templates['parameter_library_header'])
+        params = [
+            rust_param(p, index) for index, p in enumerate(self.declare_parameters)
+        ]
+        root = self.struct_tree.sub_structs[0]
         return code.render(
             comments=self.comments,
             user_validation_file=self.user_validation_file,
-            structs=rust_structs(self.struct_tree.sub_structs[0], 'Params'),
-            params=[rust_param(p) for p in self.declare_parameters],
+            structs=rust_structs(root, 'Params'),
+            params=params,
+            derive_default=not any(p['parsed'] for p in params),
+            params_literal=rust_literal(
+                root, 'Params', {p['name']: p['read'] for p in params}
+            ),
         )
+
+
+def rust_field_type(variable: CodeGenVariableBase):
+    if not variable.parsed_type:
+        return variable.lang_type
+    if variable.array_type:
+        return f'Arc<[{variable.parsed_type}]>'
+    return variable.parsed_type
+
+
+def rust_sub_struct_type(parent_type: str, sub_struct: DeclareStruct):
+    sub_type = pascal_case(sub_struct.struct_name)
+    return sub_type if parent_type == 'Params' else parent_type + sub_type
 
 
 def rust_structs(struct: DeclareStruct, type_name: str):
     fields = [
-        (field.code_gen_variable.name, field.code_gen_variable.lang_type)
+        (field.code_gen_variable.name, rust_field_type(field.code_gen_variable))
         for field in struct.fields
     ]
     nested = []
     for sub_struct in struct.sub_structs:
-        sub_type_name = pascal_case(sub_struct.struct_name)
-        if type_name != 'Params':
-            sub_type_name = type_name + sub_type_name
+        sub_type_name = rust_sub_struct_type(type_name, sub_struct)
         fields.append((sub_struct.struct_name, sub_type_name))
         nested += rust_structs(sub_struct, sub_type_name)
     return [(type_name, fields)] + nested
 
 
-def rust_param(declare_parameter: DeclareParameter):
+def rust_literal(struct: DeclareStruct, type_name: str, reads: dict):
+    fields = [
+        f'{field.code_gen_variable.name}: {reads[field.code_gen_variable.param_name]}'
+        for field in struct.fields
+    ]
+    fields += [
+        f'{sub_struct.struct_name}: '
+        + rust_literal(sub_struct, rust_sub_struct_type(type_name, sub_struct), reads)
+        for sub_struct in struct.sub_structs
+    ]
+    if type_name == 'Params':
+        fields.append('generation: 1')
+    return type_name + ' { ' + ', '.join(fields) + ' }'
+
+
+def rust_param(declare_parameter: DeclareParameter, index: int):
     variable = declare_parameter.code_gen_variable
     bound_args = {
         validation.function_base_name: validation.arguments
@@ -984,9 +1029,24 @@ def rust_param(declare_parameter: DeclareParameter):
     has_range = variable.lang_type in ('i64', 'f64') and (
         lower is not None or upper is not None
     )
+    parsed = variable.parsed_type is not None
+    expect = rust_string_literal(
+        f"parameter '{variable.param_name}' passed validation but failed to parse"
+    )
     return {
+        'index': index,
         'name': variable.param_name,
         'type': variable.lang_type,
+        'field_type': rust_field_type(variable),
+        'parsed': parsed,
+        'parse': variable.parse or f'<{variable.parsed_type}>::try_from',
+        'is_array': variable.array_type,
+        'expect': expect,
+        'read': (
+            f'convert_{index}(&param_{index}.get()).expect({expect})'
+            if parsed
+            else f'param_{index}.get()'
+        ),
         'default': variable.lang_str_value,
         'description': declare_parameter.parameter_description,
         'constraints': declare_parameter.parameter_additional_constraints,

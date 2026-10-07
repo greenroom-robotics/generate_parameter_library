@@ -2,12 +2,43 @@ mod parameters {
     include!(concat!(env!("OUT_DIR"), "/parameters.rs"));
 }
 
-mod custom_validators {
+mod custom {
     pub fn is_odd(value: i64) -> Result<(), String> {
         if value % 2 == 1 {
             Ok(())
         } else {
             Err(format!("value {value} must be odd"))
+        }
+    }
+
+    #[derive(Clone, Debug, PartialEq)]
+    pub struct HostName(String);
+
+    impl TryFrom<&str> for HostName {
+        type Error = String;
+
+        fn try_from(value: &str) -> Result<Self, String> {
+            let valid = !value.is_empty()
+                && value.split('.').all(|label| {
+                    !label.is_empty() && label.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+                });
+            if valid {
+                Ok(Self(value.to_owned()))
+            } else {
+                Err(format!("'{value}' is not a valid host name"))
+            }
+        }
+    }
+
+    #[derive(Clone, Debug, PartialEq)]
+    pub struct Port(u16);
+
+    impl Port {
+        pub fn new(value: i64) -> Result<Self, String> {
+            match u16::try_from(value) {
+                Ok(port) if port != 0 => Ok(Self(port)),
+                _ => Err(format!("{value} is not a valid port")),
+            }
         }
     }
 }
