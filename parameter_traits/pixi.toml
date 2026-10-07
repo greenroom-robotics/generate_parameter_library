@@ -1,0 +1,5 @@
+[package]
+name = "parameter_traits"
+version = "10.0.1"
+description = "Functions and types for rclcpp::Parameter"
+license = "BSD-3-Clause"

@@ -1,0 +1,5 @@
+[package]
+name = "generate_parameter_library"
+version = "10.0.1"
+description = "CMake to generate ROS parameter library."
+license = "BSD-3-Clause"

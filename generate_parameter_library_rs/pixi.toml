@@ -1,0 +1,5 @@
+[package]
+name = "generate_parameter_library_rs"
+version = "1.0.0"
+description = "build.rs helper that generates rclrs parameter code with generate_parameter_library_py"
+license = "BSD-3-Clause"
