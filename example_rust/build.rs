@@ -6,6 +6,7 @@ fn main() {
     let status = Command::new("generate_parameter_library_rust")
         .arg(&out)
         .arg(yaml)
+        .arg("crate::custom")
         .status()
         .expect("generate_parameter_library_rust not found, is generate_parameter_library_py installed?");
     assert!(status.success(), "parameter generation failed");

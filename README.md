@@ -196,6 +196,8 @@ A parameter is a YAML dictionary with the only required key being `type`.
 | description            | Displayed by `ros2 param describe`.                                                                            |
 | validation             | Dictionary of validation functions and their parameters.                                                       |
 | additional_constraints | Additional constraints that end up on the ParameterDescriptor but are not used for validation by this package. |
+| parsed_type            | Type that the parameter value is parsed into in the generated struct. Rust only, see [Parsed types](#parsed-types). |
+| parse                  | Function that parses the parameter value into `parsed_type`. Rust only, see [Parsed types](#parsed-types).         |
 
 The types of parameters in ros2 map to C++ types.
 
@@ -498,6 +500,33 @@ pub fn is_odd(value: i64) -> Result<(), String> {
     if value % 2 == 1 { Ok(()) } else { Err(format!("value {value} must be odd")) }
 }
 ```
+
+#### Parsed types
+`parsed_type` stores a parameter in the generated struct as your own type instead of the ROS type.
+The ROS parameter keeps its `type`, so `ros2 param` still sees a `string`, `int` and so on.
+
+```yaml
+turtlesim:
+  host:
+    type: string
+    default_value: "robot.local"
+    parsed_type: HostName
+  ports:
+    type: int_array
+    default_value: [8080, 9090]
+    parsed_type: Port
+    parse: Port::new
+```
+
+This gives `pub host: HostName` and `pub ports: Arc<[Port]>`. Array types are parsed one element at a time.
+
+* `parse` is a function that takes the same value as a custom validator (`&str`, `i64`, `f64` or `bool`) and returns `Result<T, E>`, where `E: Display`. For arrays, it takes one element.
+* If there is no `parse`, `<T>::try_from(value)` is used. Thus `HostName` needs only `impl TryFrom<&str> for HostName`.
+* The parsed type must implement `Clone`, `Debug` and `PartialEq`. When any parameter has a `parsed_type`, `Params` does not derive `Default`.
+* Type and function names resolve in the same way as custom validators. Write them as paths, or pass a module as the third argument of `generate_parameter_library_rust` to bring its items into scope.
+* A value that does not parse is rejected, with the error from the parse function as the reason. This applies at declaration and when the parameter is set.
+* The parse function must be deterministic. rclrs gives no way to keep a value from the validation step, so the parse function runs one time during validation and again when the value is stored. If the second parse fails, the node panics.
+* The C++ and Python generators do not support `parsed_type` yet. They stop with an error if they find it.
 
 #### Gaps compared to C++
 * **No mapped parameters.** `__map_` parameters cause a generation error.

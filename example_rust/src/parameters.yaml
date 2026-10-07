@@ -22,7 +22,7 @@ example_rust:
     default_value: 3
     validation:
       gt_eq<>: [0]
-      "crate::custom_validators::is_odd": null
+      is_odd: null
   sim:
     type: bool
     default_value: false
@@ -60,6 +60,15 @@ example_rust:
       d:
         type: double
         default_value: 0.0
+  host:
+    type: string
+    default_value: "robot.local"
+    parsed_type: HostName
+  ports:
+    type: int_array
+    default_value: [8080, 9090]
+    parsed_type: Port
+    parse: Port::new
   docs_only:
     type: none
     description: "Documentation only, no code generated"

@@ -11,10 +11,22 @@ use validators::*;
 #[allow(unused_imports)]
 use {{user_validation_file}}::*;
 {% endif %}
+{% macro view(p) %}
+{% if p.type == 'Arc<str>' %}
+        let param: &str = raw;
+{% elif p.type == 'Arc<[Arc<str>]>' %}
+        let param: Vec<&str> = raw.iter().map(|s| &**s).collect();
+        let param = param.as_slice();
+{% elif p.type.startswith('Arc<[') %}
+        let param: &[_] = raw;
+{% else %}
+        let param = *raw;
+{% endif %}
+{% endmacro %}
 {% for type_name, fields in structs %}
 
 #[allow(dead_code)]
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, {% if derive_default %}Default, {% endif %}PartialEq)]
 pub struct {{type_name}} {
 {% for name, type in fields %}
     pub {{name}}: {{type}},
@@ -56,14 +68,26 @@ impl ParamListener {
         } else {
             format!("{prefix}.")
         };
-        let params = Arc::new(Mutex::new(Params::default()));
 {% for p in params %}
 
         let parameter_name = format!("{prefix}{{p.name}}");
-{% if p.validations %}
+{% if p.parsed %}
+        let convert_{{p.index}} = |raw: &{{p.type}}| -> Result<{{p.field_type}}, String> {
+{{ view(p) | indent(4, true) }}
+{% if p.is_array %}
+            param
+                .iter()
+                .map(|value| {{p.parse}}(*value).map_err(|e| e.to_string()))
+                .collect()
+{% else %}
+            {{p.parse}}(param).map_err(|e| e.to_string())
+{% endif %}
+        };
+{% endif %}
+{% if p.validations or p.parsed %}
         let validation_name = parameter_name.clone();
 {% endif %}
-        let param_{{loop.index}} = node
+        let param_{{p.index}} = node
             .declare_parameter::<{{p.type}}>(parameter_name.as_str())
 {% if p.default %}
             .default({{p.default}})
@@ -77,46 +101,49 @@ impl ParamListener {
 {% if p.range %}
             .range(ParameterRange { lower: {{p.range[0]}}, upper: {{p.range[1]}}, step: None })
 {% endif %}
+{% if p.validations or p.parsed %}
+            .validate(move |raw: &{{p.type}}| {
 {% if p.validations %}
-            .validate(move |param: &{{p.type}}| {
-{% if p.type == 'Arc<str>' %}
-                let param: &str = param;
-{% elif p.type == 'Arc<[Arc<str>]>' %}
-                let param: Vec<&str> = param.iter().map(|s| &**s).collect();
-                let param = param.as_slice();
-{% elif p.type.startswith('Arc<[') %}
-                let param: &[_] = param;
-{% else %}
-                let param = *param;
+{{ view(p) | indent(8, true) }}
 {% endif %}
                 Ok(())
 {% for validation in p.validations %}
                     .and_then(|()| {{validation}})
 {% endfor %}
+{% if p.parsed %}
+                    .and_then(|()| convert_{{p.index}}(raw).map(|_| ()))
+{% endif %}
                     .map_err(|e: String| format!("Invalid value for parameter '{validation_name}': {e}"))
             })
 {% endif %}
 {% if p.read_only %}
             .read_only()
-            .map_err(|error| DeclareError { parameter: parameter_name, error })?;
 {% else %}
             .mandatory()
+{% endif %}
             .map_err(|error| DeclareError { parameter: parameter_name, error })?;
+{% endfor %}
+
+        let params = Arc::new(Mutex::new({{params_literal}}));
+{% for p in params if not p.read_only %}
         {
             let params = Arc::clone(&params);
-            param_{{loop.index}}.on_change(move |value| {
+            param_{{p.index}}.on_change(move |value| {
                 let mut params = params.lock().unwrap();
+{% if p.parsed %}
+                params.{{p.name}} = convert_{{p.index}}(value).expect({{p.expect}});
+{% else %}
                 params.{{p.name}} = {% if p.type.startswith('Arc') %}value.clone(){% else %}*value{% endif %};
+{% endif %}
                 params.generation += 1;
             });
         }
-{% endif %}
 {% endfor %}
 
         {
             let mut params = params.lock().unwrap();
 {% for p in params %}
-            params.{{p.name}} = param_{{loop.index}}.get();
+            params.{{p.name}} = {{p.read}};
 {% endfor %}
             params.generation += 1;
         }
@@ -125,7 +152,7 @@ impl ParamListener {
             params,
             _handles: vec![
 {% for p in params %}
-                Box::new(param_{{loop.index}}),
+                Box::new(param_{{p.index}}),
 {% endfor %}
             ],
         })
