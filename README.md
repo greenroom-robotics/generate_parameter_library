@@ -1,5 +1,5 @@
 # generate_parameter_library
-Generate C++ or Python code for ROS 2 parameter declaration, getting, and validation using declarative YAML.
+Generate C++, Python or Rust (rclrs) code for ROS 2 parameter declaration, getting, and validation using declarative YAML.
 The generated library contains a C++ struct with specified parameters.
 Additionally, dynamic parameters and custom validation are made easy.
 
@@ -154,6 +154,7 @@ when using `gmock` test library.
 * [Custom validator functions](#custom-validator-functions)
 * [Nested structures](#nested-structures)
 * [Use generated struct in Cpp](#use-generated-struct-in-cpp)
+* [Use generated struct in Rust (rclrs)](#use-generated-struct-in-rust-rclrs)
 * [Dynamic Parameters](#dynamic-parameters)
 * [Example Project](#example-project)
 * [Generated code output](#generated-code-output)
@@ -437,6 +438,75 @@ auto param_listener = std::make_shared<turtlesim::ParamListener>(node);
 auto params = param_listener->get_params();
 ```
 
+### Use generated struct in Rust (rclrs)
+Rust code is generated against [rclrs](https://crates.io/crates/rclrs) 0.8 with the `generate_parameter_library_rust` script (installed by `generate_parameter_library_py`).
+Call it from a `build.rs`:
+
+**build.rs**
+```rust
+use std::{env, path::PathBuf, process::Command};
+
+fn main() {
+    let yaml = "src/turtlesim_parameters.yaml";
+    let out = PathBuf::from(env::var("OUT_DIR").unwrap()).join("turtlesim_parameters.rs");
+    let status = Command::new("generate_parameter_library_rust")
+        .arg(&out)
+        .arg(yaml)
+        .status()
+        .expect("generate_parameter_library_rust not found");
+    assert!(status.success(), "parameter generation failed");
+    println!("cargo:rerun-if-changed={yaml}");
+}
+```
+
+Include the generated file in its own module, because it brings `Arc`, `Mutex` and the validator functions into scope:
+
+**src/main.rs**
+```rust
+mod turtlesim_parameters {
+    include!(concat!(env!("OUT_DIR"), "/turtlesim_parameters.rs"));
+}
+
+let listener = turtlesim_parameters::ParamListener::new(&node, "")?;
+let mut params = listener.get_params();
+
+if listener.is_old(&params) {
+    params = listener.get_params();
+}
+let color = &params.background;
+```
+
+`ParamListener::new` returns a `DeclareError` that names the parameter that failed (no value for a parameter without a default, or an initial value that a validator rejects).
+`Params` derives `Clone`, `Debug`, `Default` and `PartialEq`. A nested struct gets a type name made from its path, for example `nest1.nest2` becomes `Nest1Nest2`.
+
+| Parameter Type | Rust Type         |
+| -------------- | ----------------- |
+| string         | `Arc<str>`        |
+| double         | `f64`             |
+| int            | `i64`             |
+| bool           | `bool`            |
+| string_array   | `Arc<[Arc<str>]>` |
+| double_array   | `Arc<[f64]>`      |
+| int_array      | `Arc<[i64]>`      |
+| bool_array     | `Arc<[bool]>`     |
+
+Custom validators are Rust paths, for example `"crate::validators::is_odd": null`, and return `Result<(), String>`.
+The first argument is the parameter value as `i64`, `f64`, `bool`, `&str`, `&[i64]`, `&[f64]`, `&[bool]` or `&[&str]`:
+
+```rust
+pub fn is_odd(value: i64) -> Result<(), String> {
+    if value % 2 == 1 { Ok(()) } else { Err(format!("value {value} must be odd")) }
+}
+```
+
+#### Gaps compared to C++
+* **No mapped parameters.** `__map_` parameters cause a generation error.
+* **Updates are not atomic across parameters.** rclrs has no callback that receives a batch of parameters. It calls `on_change` once for each parameter. A `set_parameters_atomically` call that changes N parameters therefore updates `Params` N times, and a `get_params` call between those updates sees some of the new values but not all.
+* **No fixed-size types and no `StackParams`.** `string_fixed_XX`, `*_array_fixed_XX` and `get_stack_params` are not generated.
+* **No lifecycle node and no logger.** `ParamListener::new` accepts only an rclrs node.
+* **Range errors are generic.** `bounds<>`, `gt_eq<>` and `lt_eq<>` on `int` and `double` set the descriptor range. rclrs checks the range before the validators, so an out-of-range set fails with `Parameter value is out of range` and not with the validator message.
+* **Validator messages are not identical to the rsl messages.** The built-in validators are a Rust port that is generated inline into each file.
+
 ### Dynamic Parameters
 If you are using dynamic parameters, you can use the following code to check if any of your parameters have changed and then get a new copy of the `Params` struct.
 ```c++
@@ -489,7 +559,7 @@ force_torque_broadcaster_controller:
 
 
 ### Example Project
-See [cpp example](example/) or [python example](example_python/) for complete examples of how to use the generate_parameter_library.
+See [cpp example](example/), [python example](example_python/) or [rust example](example_rust/) for complete examples of how to use the generate_parameter_library.
 
 ### Generated code output
 The generated code primarily consists of two major components:

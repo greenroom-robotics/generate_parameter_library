@@ -47,6 +47,10 @@ import yaml
 
 from generate_parameter_library_py.cpp_conversions import CPPConversions
 from generate_parameter_library_py.python_conversions import PythonConversions
+from generate_parameter_library_py.rust_conversions import (
+    RustConversions,
+    rust_string_literal,
+)
 from generate_parameter_library_py.string_filters_cpp import (
     valid_string_cpp,
     valid_string_python,
@@ -170,9 +174,11 @@ class CodeGenVariableBase:
             self.conversion = CPPConversions()
         elif language == 'python':
             self.conversion = PythonConversions()
+        elif language == 'rust':
+            self.conversion = RustConversions(defined_type)
         else:
             raise compile_error(
-                'Invalid language, only c++ and python are currently supported.'
+                'Invalid language, only c++, python and rust are currently supported.'
             )
 
         self.name = name
@@ -740,9 +746,11 @@ class GenerateCode:
             self.comments = '<!--- auto-generated DO NOT EDIT -->'
         elif language == 'python' or language == 'markdown':
             self.comments = '# auto-generated DO NOT EDIT'
+        elif language == 'rust':
+            self.comments = '// auto-generated DO NOT EDIT'
         else:
             raise compile_error(
-                'Invalid language, only cpp, markdown, rst, and python are currently supported.'
+                'Invalid language, only cpp, markdown, rst, python and rust are currently supported.'
             )
         GenerateCode.templates = get_all_templates(language)
         self.language = language
@@ -808,6 +816,10 @@ class GenerateCode:
 
         # check if runtime parameter
         is_runtime_parameter = is_mapped_parameter(param_name)
+        if is_runtime_parameter and self.language == 'rust':
+            raise compile_error(
+                f'Parameter {param_name}: mapped parameters (__map_) are not supported for rust.'
+            )
 
         if is_runtime_parameter:
             declare_parameter_set = SetRuntimeParameter(param_name, code_gen_variable)
@@ -891,6 +903,8 @@ class GenerateCode:
             self.parse_params(name, root_map, nested_name)
 
     def __str__(self):
+        if self.language == 'rust':
+            return self.rust_str()
         data = {
             'user_validation_file': self.user_validation_file,
             'comments': self.comments,
@@ -930,3 +944,64 @@ class GenerateCode:
         )
         code = j2_template.render(data, trim_blocks=True)
         return code
+
+    def rust_str(self):
+        env = Environment(keep_trailing_newline=True, trim_blocks=True)
+        env.filters['rust_string_literal'] = rust_string_literal
+        code = env.from_string(GenerateCode.templates['parameter_library_header'])
+        return code.render(
+            comments=self.comments,
+            user_validation_file=self.user_validation_file,
+            structs=rust_structs(self.struct_tree.sub_structs[0], 'Params'),
+            params=[rust_param(p) for p in self.declare_parameters],
+        )
+
+
+def rust_structs(struct: DeclareStruct, type_name: str):
+    fields = [
+        (field.code_gen_variable.name, field.code_gen_variable.lang_type)
+        for field in struct.fields
+    ]
+    nested = []
+    for sub_struct in struct.sub_structs:
+        sub_type_name = pascal_case(sub_struct.struct_name)
+        if type_name != 'Params':
+            sub_type_name = type_name + sub_type_name
+        fields.append((sub_struct.struct_name, sub_type_name))
+        nested += rust_structs(sub_struct, sub_type_name)
+    return [(type_name, fields)] + nested
+
+
+def rust_param(declare_parameter: DeclareParameter):
+    variable = declare_parameter.code_gen_variable
+    bound_args = {
+        validation.function_base_name: validation.arguments
+        for validation in declare_parameter.parameter_validations
+    }
+    lower, upper = bound_args.get('bounds', [None, None])
+    lower = bound_args.get('gt_eq', [lower])[0]
+    upper = bound_args.get('lt_eq', [upper])[0]
+    has_range = variable.lang_type in ('i64', 'f64') and (
+        lower is not None or upper is not None
+    )
+    return {
+        'name': variable.param_name,
+        'type': variable.lang_type,
+        'default': variable.lang_str_value,
+        'description': declare_parameter.parameter_description,
+        'constraints': declare_parameter.parameter_additional_constraints,
+        'read_only': declare_parameter.parameter_read_only,
+        'validations': [str(v) for v in declare_parameter.parameter_validations],
+        'range': (
+            [
+                (
+                    f'Some({variable.get_python_val_to_str_func(bound)(bound)})'
+                    if bound is not None
+                    else 'None'
+                )
+                for bound in (lower, upper)
+            ]
+            if has_range
+            else None
+        ),
+    }

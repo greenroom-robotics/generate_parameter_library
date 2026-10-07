@@ -1,0 +1,268 @@
+{{comments}}
+
+use std::sync::{Arc, Mutex};
+
+#[allow(unused_imports)]
+use rclrs::{DeclarationError, NodeState, ParameterRange};
+
+#[allow(unused_imports)]
+use validators::*;
+{% if user_validation_file %}
+#[allow(unused_imports)]
+use {{user_validation_file}}::*;
+{% endif %}
+{% for type_name, fields in structs %}
+
+#[allow(dead_code)]
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct {{type_name}} {
+{% for name, type in fields %}
+    pub {{name}}: {{type}},
+{% endfor %}
+{% if type_name == 'Params' %}
+    generation: u64,
+{% endif %}
+}
+{% endfor %}
+
+#[derive(Debug)]
+pub struct DeclareError {
+    pub parameter: String,
+    pub error: DeclarationError,
+}
+
+impl std::fmt::Display for DeclareError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "parameter '{}': {}", self.parameter, self.error)
+    }
+}
+
+impl std::error::Error for DeclareError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&self.error)
+    }
+}
+
+pub struct ParamListener {
+    params: Arc<Mutex<Params>>,
+    _handles: Vec<Box<dyn std::any::Any + Send + Sync>>,
+}
+
+#[allow(dead_code)]
+impl ParamListener {
+    pub fn new(node: &NodeState, prefix: &str) -> Result<Self, DeclareError> {
+        let prefix = if prefix.is_empty() || prefix.ends_with('.') {
+            prefix.to_owned()
+        } else {
+            format!("{prefix}.")
+        };
+        let params = Arc::new(Mutex::new(Params::default()));
+{% for p in params %}
+
+        let parameter_name = format!("{prefix}{{p.name}}");
+{% if p.validations %}
+        let validation_name = parameter_name.clone();
+{% endif %}
+        let param_{{loop.index}} = node
+            .declare_parameter::<{{p.type}}>(parameter_name.as_str())
+{% if p.default %}
+            .default({{p.default}})
+{% endif %}
+{% if p.description %}
+            .description({{p.description | rust_string_literal}})
+{% endif %}
+{% if p.constraints %}
+            .constraints({{p.constraints | rust_string_literal}})
+{% endif %}
+{% if p.range %}
+            .range(ParameterRange { lower: {{p.range[0]}}, upper: {{p.range[1]}}, step: None })
+{% endif %}
+{% if p.validations %}
+            .validate(move |param: &{{p.type}}| {
+{% if p.type == 'Arc<str>' %}
+                let param: &str = param;
+{% elif p.type == 'Arc<[Arc<str>]>' %}
+                let param: Vec<&str> = param.iter().map(|s| &**s).collect();
+                let param = param.as_slice();
+{% elif p.type.startswith('Arc<[') %}
+                let param: &[_] = param;
+{% else %}
+                let param = *param;
+{% endif %}
+                Ok(())
+{% for validation in p.validations %}
+                    .and_then(|()| {{validation}})
+{% endfor %}
+                    .map_err(|e: String| format!("Invalid value for parameter '{validation_name}': {e}"))
+            })
+{% endif %}
+{% if p.read_only %}
+            .read_only()
+            .map_err(|error| DeclareError { parameter: parameter_name, error })?;
+{% else %}
+            .mandatory()
+            .map_err(|error| DeclareError { parameter: parameter_name, error })?;
+        {
+            let params = Arc::clone(&params);
+            param_{{loop.index}}.on_change(move |value| {
+                let mut params = params.lock().unwrap();
+                params.{{p.name}} = {% if p.type.startswith('Arc') %}value.clone(){% else %}*value{% endif %};
+                params.generation += 1;
+            });
+        }
+{% endif %}
+{% endfor %}
+
+        {
+            let mut params = params.lock().unwrap();
+{% for p in params %}
+            params.{{p.name}} = param_{{loop.index}}.get();
+{% endfor %}
+            params.generation += 1;
+        }
+
+        Ok(Self {
+            params,
+            _handles: vec![
+{% for p in params %}
+                Box::new(param_{{loop.index}}),
+{% endfor %}
+            ],
+        })
+    }
+
+    pub fn get_params(&self) -> Params {
+        self.params.lock().unwrap().clone()
+    }
+
+    pub fn try_get_params(&self, params: &mut Params) -> bool {
+        let Ok(current) = self.params.try_lock() else {
+            return false;
+        };
+        if current.generation != params.generation {
+            *params = current.clone();
+        }
+        true
+    }
+
+    pub fn is_old(&self, other: &Params) -> bool {
+        self.params.lock().unwrap().generation != other.generation
+    }
+}
+
+pub mod validators {
+    #![allow(dead_code)]
+
+    use std::fmt::{Debug, Display};
+
+    pub trait Len {
+        fn size(&self) -> usize;
+    }
+
+    impl Len for &str {
+        fn size(&self) -> usize {
+            self.len()
+        }
+    }
+
+    impl<T> Len for &[T] {
+        fn size(&self) -> usize {
+            self.len()
+        }
+    }
+
+    pub fn bounds<T: PartialOrd + Display>(value: T, lower: T, upper: T) -> Result<(), String> {
+        if value < lower || value > upper {
+            return Err(format!("value {value} must be within bounds [{lower}, {upper}]"));
+        }
+        Ok(())
+    }
+
+    pub fn lt<T: PartialOrd + Display>(value: T, limit: T) -> Result<(), String> {
+        if value < limit { Ok(()) } else { Err(format!("value {value} must be below {limit}")) }
+    }
+
+    pub fn gt<T: PartialOrd + Display>(value: T, limit: T) -> Result<(), String> {
+        if value > limit { Ok(()) } else { Err(format!("value {value} must be above {limit}")) }
+    }
+
+    pub fn lt_eq<T: PartialOrd + Display>(value: T, limit: T) -> Result<(), String> {
+        if value <= limit {
+            Ok(())
+        } else {
+            Err(format!("value {value} must be below or equal to {limit}"))
+        }
+    }
+
+    pub fn gt_eq<T: PartialOrd + Display>(value: T, limit: T) -> Result<(), String> {
+        if value >= limit {
+            Ok(())
+        } else {
+            Err(format!("value {value} must be above or equal to {limit}"))
+        }
+    }
+
+    pub fn one_of<T: PartialEq + Debug>(value: T, collection: &[T]) -> Result<(), String> {
+        if collection.contains(&value) {
+            return Ok(());
+        }
+        Err(format!("value {value:?} must be one of {collection:?}"))
+    }
+
+    pub fn fixed_size<L: Len>(value: L, size: usize) -> Result<(), String> {
+        let actual = value.size();
+        if actual == size { Ok(()) } else { Err(format!("length {actual} must be equal to {size}")) }
+    }
+
+    pub fn size_gt<L: Len>(value: L, size: usize) -> Result<(), String> {
+        let actual = value.size();
+        if actual > size { Ok(()) } else { Err(format!("length {actual} must be greater than {size}")) }
+    }
+
+    pub fn size_lt<L: Len>(value: L, size: usize) -> Result<(), String> {
+        let actual = value.size();
+        if actual < size { Ok(()) } else { Err(format!("length {actual} must be less than {size}")) }
+    }
+
+    pub fn not_empty<L: Len>(value: L) -> Result<(), String> {
+        if value.size() > 0 { Ok(()) } else { Err("must not be empty".to_owned()) }
+    }
+
+    // ponytail: O(n^2) scan, avoids requiring Hash/Ord so f64 arrays work
+    pub fn unique<T: PartialEq + Debug>(values: &[T]) -> Result<(), String> {
+        for (i, value) in values.iter().enumerate() {
+            if values[..i].contains(value) {
+                return Err(format!("contains duplicate entry {value:?}"));
+            }
+        }
+        Ok(())
+    }
+
+    pub fn subset_of<T: PartialEq + Debug>(values: &[T], set: &[T]) -> Result<(), String> {
+        match values.iter().find(|value| !set.contains(value)) {
+            Some(value) => Err(format!("entry {value:?} must be one of {set:?}")),
+            None => Ok(()),
+        }
+    }
+
+    pub fn element_bounds<T: PartialOrd + Display>(values: &[T], lower: T, upper: T) -> Result<(), String> {
+        match values.iter().find(|value| **value < lower || **value > upper) {
+            Some(value) => Err(format!("entry {value} must be within bounds [{lower}, {upper}]")),
+            None => Ok(()),
+        }
+    }
+
+    pub fn lower_element_bounds<T: PartialOrd + Display>(values: &[T], lower: T) -> Result<(), String> {
+        match values.iter().find(|value| **value < lower) {
+            Some(value) => Err(format!("entry {value} must be above or equal to {lower}")),
+            None => Ok(()),
+        }
+    }
+
+    pub fn upper_element_bounds<T: PartialOrd + Display>(values: &[T], upper: T) -> Result<(), String> {
+        match values.iter().find(|value| **value > upper) {
+            Some(value) => Err(format!("entry {value} must be below or equal to {upper}")),
+            None => Ok(()),
+        }
+    }
+}

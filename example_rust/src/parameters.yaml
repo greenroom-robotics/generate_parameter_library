@@ -1,0 +1,65 @@
+example_rust:
+  rate:
+    type: double
+    default_value: 10.0
+    description: "Loop rate in Hz"
+    validation:
+      bounds<>: [1, 100]
+  name:
+    type: string
+    default_value: "robot"
+    validation:
+      not_empty<>: []
+      size_lt<>: [16]
+  mode:
+    type: string
+    default_value: "standby"
+    additional_constraints: "{\"enum\":[\"standby\",\"run\"]}"
+    validation:
+      one_of<>: [["standby", "run"]]
+  retries:
+    type: int
+    default_value: 3
+    validation:
+      gt_eq<>: [0]
+      "crate::custom_validators::is_odd": null
+  sim:
+    type: bool
+    default_value: false
+    read_only: true
+  required_id:
+    type: int
+    description: "No default, so this must be set at launch"
+  joints:
+    type: string_array
+    default_value: ["joint1", "joint2"]
+    validation:
+      unique<>: null
+      subset_of<>: [["joint1", "joint2", "joint3"]]
+  limits:
+    type: double_array
+    default_value: [0.5, 1.5]
+    validation:
+      element_bounds<>: [0.0, 2.0]
+      fixed_size<>: [2]
+  flags:
+    type: bool_array
+    default_value: []
+  ids:
+    type: int_array
+    default_value: [1, 2, 3]
+    validation:
+      lower_element_bounds<>: [0]
+  gains:
+    p:
+      type: double
+      default_value: 1.0
+      validation:
+        gt<>: [0.0]
+    inner:
+      d:
+        type: double
+        default_value: 0.0
+  docs_only:
+    type: none
+    description: "Documentation only, no code generated"
