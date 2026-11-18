@@ -39,7 +39,7 @@ jobs:
       - uses: actions/checkout@v7
       - id: ici
         name: Run industrial_ci
-        uses: ros-industrial/industrial_ci@master
+        uses: ros-industrial/industrial_ci@125164b9f1883cdf1858897a7146d1bebf2be5c6 # master
         env: ${{ matrix.env }}
       - name: Upload test artifacts (on failure)
         uses: actions/upload-artifact@v7
