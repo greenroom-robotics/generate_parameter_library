@@ -34,7 +34,7 @@ jobs:
       UPSTREAM_WORKSPACE: upstream.repos
 
     name: ${{ matrix.env.ROS_DISTRO }}-${{ matrix.env.ROS_REPO }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v7
       - id: ici
